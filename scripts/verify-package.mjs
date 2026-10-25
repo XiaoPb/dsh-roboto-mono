@@ -95,7 +95,7 @@ check("patch id line has no trailing comment", /^\s*(?:-\s*)?id:\s*[^#\s]+\s*$/.
 const client = read("client.js");
 check("client bundle is substantial (fonts embedded)", sizeOf("client.js") > 1_000_000, `${sizeOf("client.js")} bytes`);
 check("client bundle uses the DSH module loader", client.includes("window.__ModuleLoader__.load("), "missing loader call");
-check("client loader id matches the entry id", client.includes(`id: "${entryId}"`), `expected id: "${entryId}"`);
+check("client loader id matches the npm package name", client.includes(`id: "${pkg.name}"`), `expected id: "${pkg.name}" (the runtime resolves the module by package name, not the patch entry id)`);
 for (const family of ["Roboto Mono", "DejaVu Sans Mono", "RobotoMono NF"]) {
   // The CSS is embedded through JSON.stringify, so quotes are backslash-escaped.
   check(`client declares @font-face ${family}`, client.includes(`font-family:\\"${family}\\"`), "missing font face");

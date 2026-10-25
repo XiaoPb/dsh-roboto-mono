@@ -37,7 +37,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: "dsh-roboto-mono",
+  id: "@xiaopb/dsh-roboto-mono",
   factory: function (require) {
     var module = { exports: {} };
     var exports = module.exports;

@@ -18,6 +18,7 @@ import vm from "node:vm";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const patch = readFileSync(join(root, "cordis.patch.yml"), "utf8");
 const entryId = patch.match(/-\s*insert:\s*\n\s*-\s*id:\s*(\S+)/)?.[1] ?? "";
+const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const source = readFileSync(join(root, "client.js"), "utf8");
 
 const failures = [];
@@ -123,7 +124,7 @@ vm.runInContext(source, context, { filename: "client.js" });
 /* ---------- assertions ---------- */
 assert("client.js loads through the DSH module loader", loaded.length === 1, `loader called ${loaded.length} time(s)`);
 const registration = loaded[0] ?? {};
-assert("loader id matches the bundle patch id", registration.id === entryId, `${registration.id} vs ${entryId}`);
+assert("loader id matches the npm package name", registration.id === pkg.name, `${registration.id} vs ${pkg.name}`);
 assert("loader receives a factory", typeof registration.factory === "function", typeof registration.factory);
 
 const moduleExports = registration.factory ? registration.factory(null) : {};

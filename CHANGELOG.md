@@ -4,6 +4,18 @@ All notable changes to `@xiaopb/dsh-roboto-mono` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-10-26
+
+### Fixed
+
+- Client bundle now registers under the npm package name
+  `@xiaopb/dsh-roboto-mono` via `__ModuleLoader__.load` instead of the patch
+  entry id, fixing the loader failure
+  `loaded without registering "@//xiaopb/dsh-roboto-mono"` that made the
+  whole client-modules bundle skip activation.
+- `verify-package` and `smoke-test` now assert the loader id against the
+  package name, matching the runtime contract.
+
 ## [1.0.0] - 2026-10-25
 
 First public release as a DSH **bundle** (installs through the plugin manager,

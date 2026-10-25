@@ -1,6 +1,6 @@
 {
   "name": "@xiaopb/dsh-roboto-mono",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Roboto Mono for DeepSeek Harness: embeds Roboto Mono, DejaVu Sans Mono and a Nerd Font icon subset so code blocks and the dsh-hardssh terminal render box-drawing symbols and Oh My Posh icons.",
   "type": "module",
   "main": "index.js",
