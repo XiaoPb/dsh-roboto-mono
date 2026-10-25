@@ -53,6 +53,7 @@ jobs:
 
       # ============ 版本与 tag 校验 ============
       - name: Resolve version and check the tag
+        id: version
         shell: bash
         run: |
           set -euo pipefail
@@ -65,8 +66,8 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match package.json version v$VERSION"
             exit 1
           fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "releasing $PACKAGE_NAME@$VERSION (tag v$VERSION)"
 
       # ============ 自检 ============
@@ -80,6 +81,7 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
@@ -94,19 +96,27 @@ jobs:
 
       # ============ 打包与校验和 ============
       - name: Pack the tarball
+        id: pack
         shell: bash
         run: |
           set -euo pipefail
           TARBALL="$(npm pack 2>/dev/null | tail -n1)"
-          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
           sha256sum "$TARBALL" > "$TARBALL.sha256"
-          echo "SHA256=$(cut -d' ' -f1 "$TARBALL.sha256")" >> "$GITHUB_ENV"
+          SHA256="$(cut -d' ' -f1 "$TARBALL.sha256")"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "checksum=$TARBALL.sha256" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           ls -lh "$TARBALL" "$TARBALL.sha256"
           cat "$TARBALL.sha256"
 
       # ============ 生成完整发布说明（与 CI 共用同一脚本） ============
       - name: Generate release notes
         shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          SHA256: ${{ steps.pack.outputs.sha256 }}
         run: |
           set -euo pipefail
           bash scripts/release-notes.sh release-notes.md
@@ -117,12 +127,12 @@ jobs:
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.TAG }}
-          name: dsh-roboto-mono ${{ env.VERSION }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: dsh-roboto-mono ${{ steps.version.outputs.version }}
           body_path: release-notes.md
           files: |
-            ${{ env.TARBALL }}
-            ${{ env.TARBALL }}.sha256
+            ${{ steps.pack.outputs.tarball }}
+            ${{ steps.pack.outputs.checksum }}
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
@@ -132,6 +142,11 @@ jobs:
 
       - name: Summarize
         shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          SHA256: ${{ steps.pack.outputs.sha256 }}
         run: |
           {
             echo "### Released"
