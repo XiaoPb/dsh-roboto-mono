@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: CI
 
 on:
@@ -14,6 +15,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   check:
     name: check (node ${{ matrix.node }})
@@ -23,9 +27,11 @@ jobs:
       matrix:
         node: [20, 22]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -39,10 +45,35 @@ jobs:
       - name: Inspect package contents
         run: npm pack --dry-run
 
-      - name: Install the packed bundle like a consumer
+      - name: Pack the tarball
+        shell: bash
         run: |
           set -euo pipefail
           npm pack 2>/dev/null | tail -n1 > tarball.txt
+          cat tarball.txt
+
+      - name: Validate the release notes generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          TARBALL="$(cat tarball.txt)"
+          SHA256="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
+          TAG="v$VERSION" VERSION="$VERSION" PACKAGE_NAME="@xiaopb/dsh-roboto-mono" \
+            TARBALL="$TARBALL" SHA256="$SHA256" \
+            bash scripts/release-notes.sh "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 版本信息' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 安装' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 发布产物' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 变更内容' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 贡献者' "$RUNNER_TEMP/release-notes.md"
+          grep -q "$SHA256" "$RUNNER_TEMP/release-notes.md"
+          echo "release notes: $(wc -l < "$RUNNER_TEMP/release-notes.md") lines"
+
+      - name: Install the packed bundle like a consumer
+        shell: bash
+        run: |
+          set -euo pipefail
           TARBALL="$(cat tarball.txt)"
           mkdir -p "$RUNNER_TEMP/consumer"
           cd "$RUNNER_TEMP/consumer"

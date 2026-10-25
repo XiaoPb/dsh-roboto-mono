@@ -1,22 +1,23 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Release
 
-# Publishes the version in package.json to npm (with provenance) and creates the
-# matching GitHub Release with the packed tarball as an asset.
+# 打 tag 或手动触发时执行完整发布：
+#   · 校验 tag ↔ package.json 版本一致
+#   · 运行仓库自检（client.js 可复现、bundle 契约、无头冒烟）
+#   · 发布 npm（带 provenance，已存在的版本自动跳过）
+#   · 打包 tarball + SHA-256，生成完整发布说明并创建/更新 GitHub Release
 #
-# Trigger:
-#   · push a tag v<version>   → tag and package.json version must agree
-#   · Actions → Release → Run workflow (ref defaults to master)
-#
-# Required repository secret: NPM_TOKEN (npm granular token with read/write on
-# the package). Provenance additionally needs a public repository.
+# 必需 Secret：NPM_TOKEN（npm granular token，对包有 read/write 权限）。
+# provenance 还要求仓库为 public 且允许 id-token: write。
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       ref:
-        description: Git ref to publish (branch or tag)
+        description: 要发布的 Git ref（分支或 tag）
         required: false
         default: master
 
@@ -28,41 +29,54 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  PACKAGE_NAME: '@xiaopb/dsh-roboto-mono'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   publish:
     name: publish npm + GitHub Release
     runs-on: ubuntu-latest
-    env:
-      PACKAGE_NAME: '@xiaopb/dsh-roboto-mono'
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || github.ref }}
-          fetch-depth: 0
+          fetch-depth: 0 # 生成变更日志需要完整历史与 tag
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
 
-      - name: Resolve the version and check the tag
+      # ============ 版本与 tag 校验 ============
+      - name: Resolve version and check the tag
+        shell: bash
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::package.json version '$VERSION' is not SemVer"
+            exit 1
+          fi
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match package.json version v$VERSION"
             exit 1
           fi
-          echo "releasing $PACKAGE_NAME@$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+          echo "releasing $PACKAGE_NAME@$VERSION (tag v$VERSION)"
 
+      # ============ 自检 ============
       - name: Install
         run: npm ci
 
       - name: Run the release checks
         run: npm run check
 
+      # ============ 发布 npm ============
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -78,32 +92,52 @@ jobs:
             npm publish --provenance --access public
           fi
 
+      # ============ 打包与校验和 ============
       - name: Pack the tarball
+        shell: bash
         run: |
           set -euo pipefail
-          npm pack 2>/dev/null | tail -n1 > tarball.txt
-          cat tarball.txt
+          TARBALL="$(npm pack 2>/dev/null | tail -n1)"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          sha256sum "$TARBALL" > "$TARBALL.sha256"
+          echo "SHA256=$(cut -d' ' -f1 "$TARBALL.sha256")" >> "$GITHUB_ENV"
+          ls -lh "$TARBALL" "$TARBALL.sha256"
+          cat "$TARBALL.sha256"
 
-      - name: Create or update the GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # ============ 生成完整发布说明（与 CI 共用同一脚本） ============
+      - name: Generate release notes
+        shell: bash
         run: |
           set -euo pipefail
-          TARBALL="$(cat tarball.txt)"
-          TAG="v$VERSION"
-          TITLE="$PACKAGE_NAME $VERSION"
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "release $TAG exists; refreshing the asset"
-            gh release upload "$TAG" "$TARBALL" --clobber
-          elif git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
-            gh release create "$TAG" "$TARBALL" --title "$TITLE" --generate-notes
-          else
-            gh release create "$TAG" "$TARBALL" --title "$TITLE" --generate-notes --target "$GITHUB_SHA"
-          fi
+          bash scripts/release-notes.sh release-notes.md
+          echo "----- release-notes.md -----"
+          cat release-notes.md
+
+      # ============ 创建 / 更新 Release ============
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: dsh-roboto-mono ${{ env.VERSION }}
+          body_path: release-notes.md
+          files: |
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          target_commitish: ${{ github.sha }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summarize
+        shell: bash
         run: |
-          echo "### Released" >> "$GITHUB_STEP_SUMMARY"
-          echo "- npm: \`$PACKAGE_NAME@$VERSION\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- GitHub Release: \`v$VERSION\` (asset: \`$(cat tarball.txt)\`)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- install: \`dsh plugin --profile web add $PACKAGE_NAME\`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Released"
+            echo ""
+            echo "- npm: [\`$PACKAGE_NAME@$VERSION\`](https://www.npmjs.com/package/$PACKAGE_NAME/v/$VERSION)"
+            echo "- GitHub Release: \`$TAG\`（附件 \`$TARBALL\`、\`$TARBALL.sha256\`）"
+            echo "- SHA-256: \`$SHA256\`"
+            echo "- 安装: \`dsh plugin --profile web add $PACKAGE_NAME\`"
+          } >> "$GITHUB_STEP_SUMMARY"

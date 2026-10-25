@@ -75,7 +75,8 @@ dsh plugin --profile web add github:XiaoPb/dsh-roboto-mono#v1.0.0
 ├── fonts/                      # 字体源文件与许可证（OFL / Bitstream / Apache-2.0）
 ├── scripts/
 │   ├── verify-package.mjs      # 清单、bundle patch、client.js 契约检查
-│   └── smoke-test.mjs          # 无浏览器跑一遍 client bundle（loader/字体/清理）
+│   ├── smoke-test.mjs          # 无浏览器跑一遍 client bundle（loader/字体/清理）
+│   └── release-notes.sh        # 生成完整发布说明（CI 与 release 共用）
 ├── build-client.mjs            # 生成 client.js（base64 内嵌）
 ├── client.js                   # 生成物，已提交，安装后直接可用
 ├── cordis.patch.yml            # bundle 自带 patch：插入本包的 Loader 行
@@ -127,10 +128,21 @@ git push origin master --tags
 ```
 
 之后 `release.yml` 会：校验 tag ↔ version → `npm ci` + `npm run check` → 发布 npm
-（已存在的版本自动跳过）→ `npm pack` → 创建 GitHub Release 并上传 tarball。
+（已存在的版本自动跳过）→ `npm pack` 并生成 SHA-256 → 生成发布说明 → 创建/更新
+GitHub Release。
+
+Release 说明由 `scripts/release-notes.sh` 生成，CI 每轮都会跑一遍以防发版时才暴露
+脚本错误，内容包括：
+
+- **版本信息**：tag、npm 包链接、提交与提交数、构建时间、触发方式、DSH/Node 版本要求；
+- **安装**：npm、离线 tarball、GitHub tag 三种方式；
+- **发布产物**：tarball 大小与 SHA-256（附件同时提供 `.sha256` 文件）；
+- **变更内容**：按 conventional commit 前缀分组（新功能 / 修复 / CI / 文档 …）；
+- **质量校验**：自检项与本次 CI 运行链接；
+- **贡献者**与**与上一 tag 的对比链接**。
 
 也可以在 Actions → **Release** → *Run workflow* 手动触发（`ref` 默认 `master`）；
-重跑同一版本只会刷新 Release 附件，不会重复发布 npm。
+重跑同一版本只会刷新 Release 说明与附件，不会重复发布 npm。
 
 ## 验证
 

@@ -26,6 +26,10 @@ no profile patch editing).
 - GitHub Actions CI (Node 20/22) and a tag-driven release workflow that
   publishes to npm with provenance and creates the GitHub Release with the
   packed tarball.
+- Complete, generated release notes (`scripts/release-notes.sh`): version and
+  commit metadata, install commands, tarball SHA-256, changes grouped by
+  conventional-commit type, contributors, and a comparison link. The same
+  script runs in CI so a broken generator fails before the release.
 
 ### Fixed
 
