@@ -23,6 +23,10 @@ no profile patch editing).
   package adds its own Loader row.
 - Zero-dependency `npm run check`: reproducible `client.js` check, bundle
   contract verification, and a headless client-bundle smoke test.
+- npm publishing prefers **Trusted Publishing (OIDC)** and falls back to the
+  `NPM_TOKEN` secret; provenance is attached in both paths. Publishing is only
+  considered done after `npm view` confirms the exact version is public, which
+  also catches npm accounts that require staged-publishing approval.
 - GitHub Actions CI (Node 20/22) and a tag-driven release workflow that
   publishes to npm with provenance and creates the GitHub Release with the
   packed tarball.

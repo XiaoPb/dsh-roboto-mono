@@ -78,6 +78,9 @@ done < <(git log --no-merges --pretty=format:'%h%x09%s%n' "$RANGE")
   echo "| 提交数量 | ${COMMIT_COUNT} |"
   echo "| 构建时间 | ${BUILD_TIME} |"
   echo "| 触发方式 | \`${EVENT}\` |"
+  if [ -n "${PUBLISH_METHOD:-}" ]; then
+    echo "| 发布方式 | ${PUBLISH_METHOD} |"
+  fi
   echo "| 校验环境 | Node.js 22 / Ubuntu |"
   echo "| DSH 版本要求 | \`${DSH_ENGINE}\` |"
   echo "| Node.js 要求 | \`${NODE_ENGINE}\` |"

@@ -4,11 +4,11 @@ name: Release
 # 打 tag 或手动触发时执行完整发布：
 #   · 校验 tag ↔ package.json 版本一致
 #   · 运行仓库自检（client.js 可复现、bundle 契约、无头冒烟）
-#   · 发布 npm（带 provenance，已存在的版本自动跳过）
-#   · 打包 tarball + SHA-256，生成完整发布说明并创建/更新 GitHub Release
+#   · 发布 npm：优先 Trusted Publishing（OIDC，无需 token），失败时回退 NPM_TOKEN
+#   · 校验版本确实已公开，再打包 tarball + SHA-256、生成完整发布说明并创建/更新 Release
 #
-# 必需 Secret：NPM_TOKEN（npm granular token，对包有 read/write 权限）。
-# provenance 还要求仓库为 public 且允许 id-token: write。
+# 首选的 Trusted Publishing 需要在 npm 包设置里登记本仓库与 workflow 文件名
+# （release.yml），并允许 id-token: write。回退方式需要 Secret：NPM_TOKEN。
 
 on:
   push:
@@ -78,20 +78,102 @@ jobs:
         run: npm run check
 
       # ============ 发布 npm ============
-      - name: Publish to npm
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Check whether this version is already published
+        id: published
+        shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$PACKAGE_NAME@$VERSION is already public on npm; skipping publish"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 首选：Trusted Publishing。显式清空 npm 用户配置（其中没有 token），
+      # npm 11.5.1+ 会用 GitHub OIDC 直接向 registry 认证，并自动附带 provenance。
+      - name: Publish via trusted publishing (OIDC)
+        id: publish_trusted
+        if: steps.published.outputs.exists == 'false'
+        continue-on-error: true
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/npm-trusted.npmrc
+        run: |
+          set -euo pipefail
+          printf 'registry=https://registry.npmjs.org/\n' > "$NPM_CONFIG_USERCONFIG"
+          set +e
+          npm publish --provenance --access public 2>&1 | tee trusted-publish.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            msg="$(grep -E 'npm (error|ERR!)' trusted-publish.log | tail -n 3 | tr '\n' ' ' | cut -c1-800)"
+            echo "::error title=Trusted publishing failed::${msg:-npm publish exited $rc}"
+            exit "$rc"
+          fi
+          echo "::notice::published via trusted publishing (OIDC)"
+
+      # 回退：NPM_TOKEN。setup-node 已把 token 写进用户 npmrc（引用 NODE_AUTH_TOKEN）。
+      - name: Publish via NPM_TOKEN (fallback)
+        id: publish_token
+        if: steps.published.outputs.exists == 'false' && steps.publish_trusted.outcome == 'failure'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::NPM_TOKEN secret is not configured"
+            echo "::error title=No credentials::Trusted publishing failed and NPM_TOKEN is not configured"
             exit 1
           fi
-          if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
-            echo "::notice::$PACKAGE_NAME@$VERSION is already on npm; skipping publish"
+          set +e
+          npm publish --provenance --access public 2>&1 | tee token-publish.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            msg="$(grep -E 'npm (error|ERR!)' token-publish.log | tail -n 3 | tr '\n' ' ' | cut -c1-800)"
+            echo "::error title=NPM_TOKEN publish failed::${msg:-npm publish exited $rc}"
+            exit "$rc"
+          fi
+          echo "::notice::published via NPM_TOKEN"
+
+      # npm 接受了请求不等于版本已公开：staged publishing 会先进入待批准状态。
+      - name: Verify the version is public
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
+              echo "::notice::$PACKAGE_NAME@$VERSION is public on npm (attempt $attempt)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error title=Version not public::$PACKAGE_NAME@$VERSION was accepted but is not visible on npm. If the account uses staged publishing, approve it at https://www.npmjs.com/package/${PACKAGE_NAME} (Staged packages), then re-run this workflow."
+          exit 1
+
+      - name: Resolve publish method
+        id: method
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.published.outputs.exists }}" = "true" ]; then
+            echo "method=already published" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.publish_trusted.outcome }}" = "success" ]; then
+            echo "method=trusted publishing (OIDC)" >> "$GITHUB_OUTPUT"
           else
-            npm publish --provenance --access public
+            echo "method=NPM_TOKEN" >> "$GITHUB_OUTPUT"
           fi
 
       # ============ 打包与校验和 ============
@@ -117,6 +199,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
           SHA256: ${{ steps.pack.outputs.sha256 }}
+          PUBLISH_METHOD: ${{ steps.method.outputs.method }}
         run: |
           set -euo pipefail
           bash scripts/release-notes.sh release-notes.md
@@ -147,11 +230,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
           SHA256: ${{ steps.pack.outputs.sha256 }}
+          PUBLISH_METHOD: ${{ steps.method.outputs.method }}
         run: |
           {
             echo "### Released"
             echo ""
             echo "- npm: [\`$PACKAGE_NAME@$VERSION\`](https://www.npmjs.com/package/$PACKAGE_NAME/v/$VERSION)"
+            echo "- 发布方式: $PUBLISH_METHOD"
             echo "- GitHub Release: \`$TAG\`（附件 \`$TARBALL\`、\`$TARBALL.sha256\`）"
             echo "- SHA-256: \`$SHA256\`"
             echo "- 安装: \`dsh plugin --profile web add $PACKAGE_NAME\`"

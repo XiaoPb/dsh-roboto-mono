@@ -110,11 +110,26 @@ npm pack --dry-run
   构建）；
 - GitHub Release：tag `vX.Y.Z`，附件是 `npm pack` 出来的 tarball，可离线安装。
 
+npm 认证按 **可信发布优先、token 回退** 执行：
+
+1. **Trusted Publishing（OIDC，首选）**：workflow 声明 `id-token: write`，发布前
+   升级到最新 npm（≥ 11.5.1），并用一个不含 token 的 npm 用户配置执行
+   `npm publish`。npm 会直接向 registry 交换 OIDC 身份，provenance 自动附带。
+2. **NPM_TOKEN（回退）**：可信发布失败（包未登记 Trusted Publisher、仓库/workflow
+   名不符、npm 版本过旧等）时，自动改用 `NPM_TOKEN` 再发布一次。
+3. **公开性校验**：发布后轮询 `npm view pkg@version`，只有版本真的可安装才继续
+   打包和创建 Release。若账号启用了 **staged publishing**，版本会先进入待批准
+   区域——workflow 会明确失败并提示去 npm 页面用 2FA 批准，批准后重跑即可。
+
 一次性配置（仓库 owner）：
 
-1. 在 npm 创建 granular access token，`Read and write` 权限，只授权本包；
-2. GitHub → Settings → Secrets and variables → Actions → 新建 `NPM_TOKEN`；
-3. 仓库保持 **public**（`--provenance` 需要公开仓库与 `id-token: write`）。
+1. npm 包设置 → **Trusted Publisher**：owner `XiaoPb`、repository
+   `dsh-roboto-mono`、workflow filename `release.yml`（只填文件名；可选 environment）；
+2. 回退凭据：npm granular token（read/write，仅本包）→ 仓库 Secrets 里的
+   `NPM_TOKEN`；
+3. 仓库保持 **public**（provenance 与可信发布都要求公开仓库 + `id-token: write`）；
+4. 如果 npm 账号要求 staged publishing，首次发布需在 npm 包页面的 **Staged
+   packages** 里批准版本（2FA）。
 
 发版：
 
@@ -122,14 +137,14 @@ npm pack --dry-run
 # 1. 改 package.json 的 version，并在 CHANGELOG.md 记录
 # 2. 提交并打 tag（tag 必须等于 v<version>，否则 release 工作流直接失败）
 git add -A
-git commit -m "release: v1.0.0"
-git tag v1.0.0
+git commit -m "release: v1.0.1"
+git tag v1.0.1
 git push origin master --tags
 ```
 
-之后 `release.yml` 会：校验 tag ↔ version → `npm ci` + `npm run check` → 发布 npm
-（已存在的版本自动跳过）→ `npm pack` 并生成 SHA-256 → 生成发布说明 → 创建/更新
-GitHub Release。
+之后 `release.yml` 会：校验 tag ↔ version → `npm ci` + `npm run check` → 可信发布
+（失败回退 token）→ 校验版本已公开 → `npm pack` 并生成 SHA-256 → 生成发布说明 →
+创建/更新 GitHub Release。
 
 Release 说明由 `scripts/release-notes.sh` 生成，CI 每轮都会跑一遍以防发版时才暴露
 脚本错误，内容包括：
