@@ -1,0 +1,109 @@
+name: Release
+
+# Publishes the version in package.json to npm (with provenance) and creates the
+# matching GitHub Release with the packed tarball as an asset.
+#
+# Trigger:
+#   · push a tag v<version>   → tag and package.json version must agree
+#   · Actions → Release → Run workflow (ref defaults to master)
+#
+# Required repository secret: NPM_TOKEN (npm granular token with read/write on
+# the package). Provenance additionally needs a public repository.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to publish (branch or tag)
+        required: false
+        default: master
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish npm + GitHub Release
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_NAME: '@xiaopb/dsh-roboto-mono'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve the version and check the tag
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version v$VERSION"
+            exit 1
+          fi
+          echo "releasing $PACKAGE_NAME@$VERSION"
+
+      - name: Install
+        run: npm ci
+
+      - name: Run the release checks
+        run: npm run check
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN secret is not configured"
+            exit 1
+          fi
+          if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "::notice::$PACKAGE_NAME@$VERSION is already on npm; skipping publish"
+          else
+            npm publish --provenance --access public
+          fi
+
+      - name: Pack the tarball
+        run: |
+          set -euo pipefail
+          npm pack 2>/dev/null | tail -n1 > tarball.txt
+          cat tarball.txt
+
+      - name: Create or update the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TARBALL="$(cat tarball.txt)"
+          TAG="v$VERSION"
+          TITLE="$PACKAGE_NAME $VERSION"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release $TAG exists; refreshing the asset"
+            gh release upload "$TAG" "$TARBALL" --clobber
+          elif git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            gh release create "$TAG" "$TARBALL" --title "$TITLE" --generate-notes
+          else
+            gh release create "$TAG" "$TARBALL" --title "$TITLE" --generate-notes --target "$GITHUB_SHA"
+          fi
+
+      - name: Summarize
+        run: |
+          echo "### Released" >> "$GITHUB_STEP_SUMMARY"
+          echo "- npm: \`$PACKAGE_NAME@$VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitHub Release: \`v$VERSION\` (asset: \`$(cat tarball.txt)\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- install: \`dsh plugin --profile web add $PACKAGE_NAME\`" >> "$GITHUB_STEP_SUMMARY"

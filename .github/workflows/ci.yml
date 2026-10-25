@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install (no dependencies, keeps the lockfile honest)
+        run: npm ci
+
+      - name: Check manifest, bundle patch and client bundle
+        run: npm run check
+
+      - name: Inspect package contents
+        run: npm pack --dry-run
+
+      - name: Install the packed bundle like a consumer
+        run: |
+          set -euo pipefail
+          npm pack 2>/dev/null | tail -n1 > tarball.txt
+          TARBALL="$(cat tarball.txt)"
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$GITHUB_WORKSPACE/$TARBALL"
+          PKG="$RUNNER_TEMP/consumer/node_modules/@xiaopb/dsh-roboto-mono"
+          node -e "const p = require('$PKG/package.json'); if (p.dsh?.bundle?.patch !== './cordis.patch.yml') throw new Error('dsh.bundle.patch missing'); if (p.dsh?.client?.platform !== 'web') throw new Error('dsh.client missing');"
+          node --input-type=module -e "import('$PKG/index.js').then((m) => { if (typeof m.apply !== 'function') throw new Error('host entry is not importable'); })"
+          test -f "$PKG/client.js"
+          test -f "$PKG/cordis.patch.yml"
+          test -f "$PKG/fonts/OFL.txt"
+          echo "installed bundle: $(node -p "require('$PKG/package.json').name + '@' + require('$PKG/package.json').version")"

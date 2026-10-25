@@ -1,0 +1,77 @@
+{
+  "name": "@xiaopb/dsh-roboto-mono",
+  "version": "1.0.0",
+  "description": "Roboto Mono for DeepSeek Harness: embeds Roboto Mono, DejaVu Sans Mono and a Nerd Font icon subset so code blocks and the dsh-hardssh terminal render box-drawing symbols and Oh My Posh icons.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    },
+    "./client": {
+      "default": "./client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "build-client.mjs",
+    "fonts/*",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build-client.mjs",
+    "check": "node build-client.mjs --check && node scripts/verify-package.mjs && node scripts/smoke-test.mjs",
+    "pack:dry": "npm pack --dry-run",
+    "prepack": "npm run check"
+  },
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.1-rc.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XiaoPb/dsh-roboto-mono.git"
+  },
+  "homepage": "https://github.com/XiaoPb/dsh-roboto-mono#readme",
+  "bugs": {
+    "url": "https://github.com/XiaoPb/dsh-roboto-mono/issues"
+  },
+  "author": "XiaoPb",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "plugin",
+    "font",
+    "roboto-mono",
+    "nerd-font",
+    "terminal",
+    "xterm",
+    "oh-my-posh"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.1-rc.2": "compatible"
+      }
+    }
+  }
+}

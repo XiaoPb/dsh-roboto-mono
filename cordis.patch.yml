@@ -1,0 +1,14 @@
+# dsh-roboto-mono bundle patch.
+#
+# This file is loaded automatically when the package is listed in the profile's
+# `dsh.profile.bundles` (the plugin manager / market does that on install), so
+# users never edit the profile cordis.patch.yml for this plugin.
+#
+# Store contract:
+#   · the row id equals the Loader entry id and stays stable across versions;
+#   · `name` is the npm package name, resolved from the profile's node_modules;
+#   · the `id:` line carries no trailing comment (the submission checker
+#     matches the value up to the line break).
+- insert:
+    - id: dsh-roboto-mono
+      name: '@xiaopb/dsh-roboto-mono'

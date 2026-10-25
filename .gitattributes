@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Font binaries: never diff or convert.
+*.ttf binary
+*.woff2 binary
+
+# Generated bundle: embedded base64 fonts, reviewed through build-client.mjs.
+client.js linguist-generated=true -diff

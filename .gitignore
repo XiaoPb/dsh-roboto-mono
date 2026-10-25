@@ -1,0 +1,15 @@
+node_modules/
+npm-debug.log*
+
+# Packed tarballs are release artifacts, not sources.
+*.tgz
+
+# Editors and OS noise.
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local DSH profile links and scratch files.
+.dsh/
+*.local
